@@ -1,7 +1,11 @@
+import logging
 from sqlalchemy import create_engine, Column, String, Integer, Text, ForeignKey, Index, Boolean
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
-import logging
+from datetime import datetime
+
+# Set up logging
+logging.basicConfig(level=logging.INFO)
 
 # Define the database connection and ORM base
 Base = declarative_base()
@@ -43,9 +47,11 @@ class Comment(Base):
     body = Column(Text, nullable=False)
     score = Column(Integer, nullable=False)
     created_utc = Column(String, nullable=False)
+    parent_comment_id = Column(Integer, ForeignKey('comments.id'), nullable=True)  # Parent comment ID for nested comments
 
     # Relationship with posts
     post = relationship("Post", back_populates="comments")
+    parent_comment = relationship("Comment", remote_side=[id], backref="replies")
 
 
 def setup_database(db_url):
@@ -57,6 +63,10 @@ def setup_database(db_url):
     try:
         logging.info(f"Connecting to database at {db_url}")
         engine = create_engine(db_url)
+        
+        # Uncomment the next line if you want to drop the existing tables and recreate them
+        # Base.metadata.drop_all(engine)  # Uncomment this if you want to reset the schema
+        
         Base.metadata.create_all(engine)  # Create tables if they don't exist
         logging.info("Database tables created successfully")
         return sessionmaker(bind=engine)
@@ -107,13 +117,17 @@ def save_posts_to_db(session_factory, posts):
                         logging.info(f"Comment already exists in database: {comment_data['comment_id']} - Skipping.")
                         continue
 
+                    # If there is a parent_comment_id, assign it
+                    parent_comment_id = comment_data.get('parent_comment_id', None)
+
                     comment = Comment(
                         comment_id=comment_data['comment_id'],
                         post_id=post_data['id'],
                         username=comment_data['username'],
                         body=comment_data['body'],
                         score=comment_data['score'],
-                        created_utc=comment_data['created_utc']
+                        created_utc=comment_data['created_utc'],
+                        parent_comment_id=parent_comment_id  # Set the parent comment ID
                     )
                     session.add(comment)
                     logging.debug(f"Comment added to session: {comment_data['comment_id']}")
@@ -125,7 +139,13 @@ def save_posts_to_db(session_factory, posts):
         raise
 
 
-def extract_post_data(self, post, subreddit_name):
+def extract_post_data(post, subreddit_name):
+    """
+    Extract data from a Reddit post object.
+    :param post: The Reddit post object (PRAW post object)
+    :param subreddit_name: The name of the subreddit
+    :return: A dictionary containing post data
+    """
     logging.debug(f"Extracting data for post: {post.title}")
     try:
         # Determine if the post is from multiple subreddits

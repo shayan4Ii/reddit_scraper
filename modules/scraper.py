@@ -34,25 +34,24 @@ class RedditScraper:
         total_posts_fetched = 0
         current_page = 0
 
-        total_posts_to_fetch = pagination_limit * 100 if pagination_limit else 100
-
         while current_page < (pagination_limit if pagination_limit else 1):
             try:
                 logging.info(f"Fetching page {current_page + 1}, starting after: {after}")
                 subreddit = self.reddit.subreddit(subreddit_name)
                 
+                # Fetch posts based on post_type
                 if post_type == "hot":
-                    posts_listing = list(subreddit.hot(limit=100, params={'after': after} if after else None))
+                    posts_listing = list(subreddit.hot(limit=post_limit, params={'after': after} if after else None))
                 elif post_type == "new":
-                    posts_listing = list(subreddit.new(limit=100, params={'after': after} if after else None))
+                    posts_listing = list(subreddit.new(limit=post_limit, params={'after': after} if after else None))
                 elif post_type == "top":
-                    posts_listing = list(subreddit.top(time_filter=time_filter, limit=100, params={'after': after} if after else None))
+                    posts_listing = list(subreddit.top(time_filter=time_filter, limit=post_limit, params={'after': after} if after else None))
                 elif post_type == "rising":
-                    posts_listing = list(subreddit.rising(limit=100, params={'after': after} if after else None))
+                    posts_listing = list(subreddit.rising(limit=post_limit, params={'after': after} if after else None))
                 elif post_type == "relevance":
                     if not search_query:
                         raise ValueError("Search query is required for relevance-based posts.")
-                    posts_listing = list(subreddit.search(query=search_query, sort="relevance", limit=100, params={'after': after} if after else None))
+                    posts_listing = list(subreddit.search(query=search_query, sort="relevance", limit=post_limit, params={'after': after} if after else None))
                 else:
                     raise ValueError("Invalid post_type")
 
@@ -92,8 +91,7 @@ class RedditScraper:
         logging.info(f"Finished fetching {len(posts)} total posts from {subreddit_name}")
         return posts
 
-    def fetch_comments(self, post, max_comments=100):
-        # logging.info(f"Fetching comments for post: {post.id}")
+    def fetch_comments(self, post, max_comments=10): #change number of comments you want to scrape from here max_comments=10 in this case
         comments_data = []
         try:
             post.comments.replace_more(limit=None)
@@ -107,7 +105,9 @@ class RedditScraper:
                         "body": comment.body,
                         "score": comment.score,
                         "created_utc": datetime.utcfromtimestamp(comment.created_utc).isoformat(),
+                        "parent_id": comment.parent_id if comment.parent_id else None,
                     })
+            logging.info(f"Fetched {len(comments_data)} comments for post {post.id}")
         except Exception as e:
             logging.error(f"Error fetching comments for post {post.id}: {e}", exc_info=True)
         return comments_data
@@ -144,6 +144,7 @@ class RedditScraper:
                     post_limit=post_limit
                 )
                 self.save_posts_with_duplicates(posts)
+                
                 time.sleep(self.api_rate_limit_delay)  # Use the configurable delay
             except Exception as e:
                 logging.error(f"Error processing subreddit '{subreddit_name}': {e}", exc_info=True)
@@ -194,14 +195,14 @@ class RedditScraper:
                         username=comment_data["username"],
                         body=comment_data["body"],
                         score=comment_data["score"],
-                        created_utc=comment_data["created_utc"]
+                        created_utc=comment_data["created_utc"],
+                        # Remove parent_id or update to something else if needed
                     )
                     Session.add(comment)
                     logging.debug(f"Comment added to session: {comment_data['comment_id']}")
 
                 # Commit after adding the post and comments
                 Session.commit()
-                # logging.info(f"Post {post_data['id']} and its comments saved successfully.")
             
         except Exception as e:
             logging.error(f"Error saving posts to database: {e}", exc_info=True)
